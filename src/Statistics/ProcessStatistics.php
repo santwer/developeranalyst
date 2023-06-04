@@ -10,6 +10,7 @@ use Santwer\DeveloperAnalyst\Dashboard\Http\Models\GitStatistics;
 class ProcessStatistics
 {
 	protected $developers;
+
 	protected $files;
 
 	public function __construct()
@@ -58,39 +59,46 @@ class ProcessStatistics
 	{
 		Files::where('batch_date', today())->delete();
 		$return = true;
-		$insert = collect($allFiles)->map(function ($filepath) use($filesTransMistakes, $filesHtmlMistakes) {
+		$insert = collect($allFiles)->map(function ($filepath) use ($filesTransMistakes, $filesHtmlMistakes) {
 			return [
-				'filepath' => $filepath,
-				'translation_mistakes' => isset($filesTransMistakes[$filepath]) ? (int)$filesTransMistakes[$filepath] : 0,
-				'html_mistakes' => isset($filesHtmlMistakes[$filepath]) ? (int)$filesHtmlMistakes[$filepath] : 0,
-				'batch_date' => today()->format('Y-m-d'),
-				'created_at' => today()->format('Y-m-d H:i:s'),
-				'updated_at' => today()->format('Y-m-d H:i:s'),
+				'filepath'             => $filepath,
+				'translation_mistakes' => isset($filesTransMistakes[$filepath]) ? (int) $filesTransMistakes[$filepath] : 0,
+				'html_mistakes'        => isset($filesHtmlMistakes[$filepath]) ? (int) $filesHtmlMistakes[$filepath] : 0,
+				'batch_date'           => today()->format('Y-m-d'),
+				'created_at'           => today()->format('Y-m-d H:i:s'),
+				'updated_at'           => today()->format('Y-m-d H:i:s'),
 			];
 		});
-		dd($allFiles);
-		if($insert->count() > 0)
-			$return =Files::insert($insert);
+
+		if ($insert->count() > 0) {
+			$return = Files::insert($insert->toArray());
+		}
 		$this->files = Files::all();
+
 		return $return;
 	}
 
 	public function saveUserFiles(array $filesPerUser = [])
 	{
 		collect($filesPerUser)->mapWithKeys(function ($mail, $files) {
-			if (($dev = $this->developers->where('mail', $mail)->first()) ) {
-				$files = collect($files)->map(function ($filepath) use($dev) {
+			if (($dev = $this->developers->where('mail', $mail)->first())) {
+				$files = collect($files)->map(function ($filepath) use ($dev) {
 					$file = $this->files->where('filepath', $filepath)->first();
-					if(null === $file) return null;
+					if (null === $file) {
+						return null;
+					}
+
 					return $file->id;
 				})->filter();
 				$dev->files()->attach($files);
+
 				return [$mail => $files->toArray()];
 			}
 
 			return [null => null];
 
 		})->filter()->toArray();
+
 		return true;
 	}
 

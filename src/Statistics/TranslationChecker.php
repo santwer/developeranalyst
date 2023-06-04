@@ -21,7 +21,21 @@ class TranslationChecker
 
 	public function __construct(array $files)
 	{
-		$this->files = $files;
+		$this->files = $this->subtractBase($files);
+	}
+
+	private function subtractBase(array|string $filePath) : array|string
+	{
+		if(is_array($filePath)) {
+			return array_map(fn($x) => $this->subtractBase($x), $filePath);
+		}
+		$filePath = Str::replace('\\','/', $filePath);
+		$base_path = Str::replace('\\','/', base_path());
+		$filePath =  Str::replace($base_path,'', $filePath);
+		if(Str::startsWith($filePath, '/')) {
+			return ltrim($filePath, '/');
+		}
+		return $filePath;
 	}
 
 	public function checkMissingTranslations() : bool
@@ -56,16 +70,18 @@ class TranslationChecker
 
 	protected function searchMissingTranslations()
 	{
-		foreach (config('developerAnalyst.blade_folders') as $folder) {
+		foreach (config('developerAnalyst.code_folders') as $folder) {
 			$directory = new RecursiveDirectoryIterator($folder);
 			$iterator = new RecursiveIteratorIterator($directory);
 			$files = new RegexIterator($iterator, '/^.+\.php$/i', RecursiveRegexIterator::GET_MATCH);
 
 			foreach ($files as $file) {
-				$filePath = $file[0];
+				$filePath = $this->subtractBase($file[0]);
+
 				if (!empty($this->files) && !in_array($filePath, $this->files)) {
 					continue;
 				}
+
 				$content = file_get_contents($filePath);
 
 				preg_match_all('/(?<!__\()(?<!lang\()(["\'])(?:(?=(\\\\?))\2.)*?\1(?!__\()/', $content, $matches);
@@ -90,31 +106,33 @@ class TranslationChecker
 
 	protected function searchMissingBladeTranslations()
 	{
-		$directory = new RecursiveDirectoryIterator(resource_path('views'));
-		$iterator = new RecursiveIteratorIterator($directory);
-		$files = new RegexIterator($iterator, '/^.+\.blade.php$/i', RecursiveRegexIterator::GET_MATCH);
+		foreach (config('developerAnalyst.blade_folders') as $folder) {
+			$directory = new RecursiveDirectoryIterator($folder);
+			$iterator = new RecursiveIteratorIterator($directory);
+			$files = new RegexIterator($iterator, '/^.+\.blade.php$/i', RecursiveRegexIterator::GET_MATCH);
 
-		foreach ($files as $file) {
-			$filePath = $file[0];
-			if (!empty($this->files) && !in_array($filePath, $this->files)) {
-				continue;
-			}
-			$content = file_get_contents($filePath);
-
-			preg_match_all('/<(?!\s*\/?\s*(?:\(|\{\{))[^>]*>(.*?)<\/[^>]+>/', $content, $matches);
-
-			foreach ($matches[0] as $i => $text) {
-				$exclude = ['{{', '}}', '@lang', '@for', '@foreach', '@while', '@if', '@end', '@else', '$', '->'];
-				if (empty(trim($text)) || Str::contains($text, $exclude)) {
+			foreach ($files as $file) {
+				$filePath = $this->subtractBase($file[0]);
+				if (!empty($this->files) && !in_array($filePath, $this->files)) {
 					continue;
 				}
-				$text = trim(strip_tags($text), "'\"");
-				if ($this->containsLanguageWord($text)) {
+				$content = file_get_contents($filePath);
 
-					if (!isset($this->fileMissingTrans[$filePath])) {
-						$this->fileMissingTrans[$filePath] = 0;
+				preg_match_all('/<(?!\s*\/?\s*(?:\(|\{\{))[^>]*>(.*?)<\/[^>]+>/', $content, $matches);
+
+				foreach ($matches[0] as $i => $text) {
+					$exclude = ['{{', '}}', '@lang', '@for', '@foreach', '@while', '@if', '@end', '@else', '$', '->'];
+					if (empty(trim($text)) || Str::contains($text, $exclude)) {
+						continue;
 					}
-					$this->fileMissingTrans[$filePath]++;
+					$text = trim(strip_tags($text), "'\"");
+					if ($this->containsLanguageWord($text)) {
+
+						if (!isset($this->fileMissingTrans[$filePath])) {
+							$this->fileMissingTrans[$filePath] = 0;
+						}
+						$this->fileMissingTrans[$filePath]++;
+					}
 				}
 			}
 		}

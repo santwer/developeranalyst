@@ -3,10 +3,12 @@
 namespace Santwer\DeveloperAnalyst\Statistics;
 
 use Gitonomy\Git\Diff\File;
+use Illuminate\Support\Str;
 use Gitonomy\Git\Repository;
 use mysql_xdevapi\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Console\View\Components\Task;
+use Illuminate\Console\View\Components\Warn;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Illuminate\Console\View\Components\BulletList;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -77,21 +79,21 @@ class GitStatistic
 		$this->write(Task::class, 'Check missing translations',
 			fn () => $translationChecker->checkMissingTranslations());
 
-		try {
-			$process = new ProcessStatistics();
-			$this->write(Task::class, 'Save Developers',
-				fn () => $process->saveDevs($this->authors));
-			$this->write(Task::class, 'Save Statistics',
-				fn () => $process->saveStats($this->stats));
-			$this->write(Task::class, 'Save Translation Mistakes',
-				fn () => $process->saveFiles($this->allFiles,
-					$translationChecker->getFiles(),
-					$translationChecker->getFilesHTML()));
-			$this->write(Task::class, 'Save Dev Mistakes',
-				fn () => $process->saveUserFiles($this->filesPerUser));
-		} catch (\Exception $exception) {
-
-		}
+//		try {
+//			$process = new ProcessStatistics();
+//			$this->write(Task::class, 'Save Developers',
+//				fn () => $process->saveDevs($this->authors));
+//			$this->write(Task::class, 'Save Statistics',
+//				fn () => $process->saveStats($this->stats));
+//			$this->write(Task::class, 'Save Translation Mistakes',
+//				fn () => $process->saveFiles($this->allFiles,
+//					$translationChecker->getFiles(),
+//					$translationChecker->getFilesHTML()));
+//			$this->write(Task::class, 'Save Dev Mistakes',
+//				fn () => $process->saveUserFiles($this->filesPerUser));
+//		} catch (\Exception $exception) {
+//			$this->write(Warn::class, 'Statistics not saved.');
+//		}
 		$this->createOutPut($translationChecker);
 	}
 
@@ -99,18 +101,34 @@ class GitStatistic
 	{
 		$data = [];
 		foreach ($this->authors as $mail => $author) {
-			$data[] = [
+			$entry = [
+				'#' => '-',
 				'author'               => $author,
 				'mail'                 => $mail,
 				'translation_mistakes' => $this->calcMistakes($mail,
 					$translationChecker->getFiles()),
 				'html_mistakes'        => $this->calcMistakes($mail,
 					$translationChecker->getFilesHTML()),
-				'total_commits'        => isset($this->authorsCommits[$author]) ? $this->authorsCommits[$author] : 0,
+				'files' => isset($this->filesPerUser[$mail]) ? count($this->filesPerUser[$mail]) : 0,
+				'total_commits'        => isset($this->authorsCommits[$mail]) ? $this->authorsCommits[$mail] : 0,
 			];
+			$mistakes = $entry['translation_mistakes'] + $entry['html_mistakes'];
+			$entry['mistakes_per_commit'] = $mistakes == 0 ? 0 :
+				round((($mistakes) / $entry['total_commits']) *1000) / 1000;
+
+			$data[] = $entry;
 		}
-		$data = collect($data)->where('total_commits', '>', 0)->toArray();
-		$this->output->table(['author', 'mail', 'translation_mistakes', 'html_mistakes', 'total_commits'], $data);
+		$data = collect($data)
+			->where('total_commits', '>', 0)
+			->sortBy('mistakes_per_commit')
+			->values()
+			->map(function ($x, $index) {
+				$x['#'] = $index + 1;
+				return $x;
+			})
+			->toArray();
+		$this->output->table(['#', 'author', 'mail', 'translation_mistakes', 'html_mistakes', 'total_commits', 'files','mistakes per commit'], $data);
+
 	}
 
 	private function calcMistakes(string $mail, array $missinTranslations)
@@ -119,12 +137,11 @@ class GitStatistic
 			return 0;
 		}
 		$sum = 0;
-		foreach ($this->filesPerUser[$mail] as $file) {
+		foreach (collect($this->filesPerUser[$mail])->unique() as $file) {
 			if (isset($missinTranslations[$file])) {
-				$sum += $sum;
+				$sum += $missinTranslations[$file];
 			}
 		}
-
 		return $sum;
 	}
 
@@ -138,12 +155,16 @@ class GitStatistic
 		$logstart = Carbon::parse(config('developerAnalyst.log_start'));
 
 		foreach ($commits->getCommits() as $commit) {
+			if(Str::startsWith($commit->getSubjectMessage(), 'Merge')) continue;
+			//dd(,$commit->getDiff()->getFiles());
 			$author = $commit->getAuthorEmail();
 			$authors[$author] = $commit->getAuthorName();
 
 			$date = Carbon::instance($commit->getAuthorDate());
 			if ($date->gte($logstart)) {
-				$this->addFiles($commit->getDiff()->getFiles(), $commit->getAuthorEmail());
+				$files = $this->getFiles($commit->getHash());
+
+				$this->addFiles($this->getFiles($commit->getHash()), $author);
 
 				if(!isset($this->authorsCommits[$author])) {
 					$this->authorsCommits[$author] = 0;
@@ -168,12 +189,39 @@ class GitStatistic
 		return $statistics;
 	}
 
+	private function getFiles($commit)
+	{
+		$output = null;
+		exec('git show --pretty="" --name-only '.$commit.'', $output);
+		$max = 100;
+		for($i = 0; $i < $max && $output === null; $i++) {
+			sleep(1);
+		}
+		return $output;
+	}
+
+	private function getAuthor($commit)
+	{
+		$output = null;
+		exec('git show --pretty="short" --name-only '.$commit.'', $output);
+		$max = 100;
+		for($i = 0; $i < $max && $output === null; $i++) {
+			sleep(1);
+		}
+		foreach($output as $line) {
+			if(strpos( $line, 'Author: ') !== false)
+				return substr($line, 8);
+
+		}
+		return null;
+	}
+
 	private function addFiles(array $files, string $author)
 	{
 		/**
 		 * @var File $file
 		 */
-		$files = array_map(fn ($file) => $file->getNewName(), $files);
+		$files = array_map(fn ($file) => $file, $files);
 		$this->allFiles = array_merge($this->allFiles, $files);
 
 		if (empty($author)) {
@@ -182,6 +230,6 @@ class GitStatistic
 		if (!isset($this->filesPerUser[$author])) {
 			$this->filesPerUser[$author] = [];
 		}
-		$this->filesPerUser[$author] = array_merge($this->allFiles, $files);
+		$this->filesPerUser[$author] = array_merge($this->filesPerUser[$author], $files);
 	}
 }

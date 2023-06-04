@@ -19,7 +19,7 @@ return [
 	'lang_path' => lang_path(),
 	'default_language' => env('DEVELOPER_ANALYST_DEFAULT_LANGUAGE', 'de'),
 
-	'log_start' => today()->startOfWeek(),
+	'log_start' => today()->startOfYear(),
 
 	'code_folders' => [
 		app_path()
