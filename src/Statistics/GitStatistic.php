@@ -127,6 +127,7 @@ class GitStatistic
 				return $x;
 			})
 			->toArray();
+		cache()->driver(config('developerAnalyst.cache_driver'))->put('stats', $data, null);
 		$this->output->table(['#', 'author', 'mail', 'translation_mistakes', 'html_mistakes', 'total_commits', 'files','mistakes per commit'], $data);
 
 	}

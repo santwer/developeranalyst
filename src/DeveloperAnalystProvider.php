@@ -35,6 +35,10 @@ class DeveloperAnalystProvider extends ServiceProvider
 				database_path('migrations/0000_00_00_000000_create_developer_analyst_developer_dev_files_table.php'),
 		], 'migrations');
 
+		$this->publishes([
+			__DIR__.'/../public' => public_path('vendor/developer-analyst'),
+		], 'devanalyst-assets');
+
 		$this
 			->registerRoutes()
 			->registerDashboardGate();
@@ -55,7 +59,11 @@ class DeveloperAnalystProvider extends ServiceProvider
 	{
 		Route::prefix(config('developerAnalyst.dashboard.path'))->group(function () {
 			Route::middleware(config('developerAnalyst.dashboard.middleware', []))->group(function () {
-				Route::get('/', [DashboardController::class, 'index']);
+				Route::get('/', [DashboardController::class, 'index'])
+				->name('developerAnalyst.dashboard.index');
+
+				Route::get('/git-statistics', [DashboardController::class, 'gitStatistics'])
+				->name('developerAnalyst.dashboard.git-statistics');
 			});
 		});
 
